@@ -60,7 +60,15 @@ Caddy needs DNS and outbound ACME access; ClamAV needs DNS and HTTPS to database
 
 ## Release / migration / image transfer
 
-Run tests before release; create a verified encrypted backup before upgrade. `deploy.sh` takes a host flock shared with backup/restore, builds compiled images (or BUILD_IMAGES=0 for loaded images), stops traffic/web/worker, starts DB/Redis, migrates exactly once using owner credentials, then starts healthy containers. Migration failure leaves traffic stopped intentionally. Runtime role cannot create schema objects/update audits. App/worker entrypoints never migrate. No demo seed is part of deployment.
+Run tests before release; create a verified encrypted backup before upgrade. `deploy.sh` takes a host flock shared with backup/restore, builds compiled images (or BUILD_IMAGES=0 for loaded images), starts DB/Redis and verifies credentials, then stops traffic/web/worker, migrates exactly once using owner credentials and starts healthy containers. Migration failure leaves traffic stopped intentionally. Runtime role cannot create schema objects/update audits. App/worker entrypoints never migrate. No demo seed is part of deployment.
+
+Deployment checks actual TCP authentication for the database owner/runtime and Redis before stopping app traffic. PostgreSQL readiness alone does not validate passwords. Bootstrap refuses to generate missing secrets when the selected Compose project already has a PostgreSQL volume.
+
+### P1000 / existing-volume secret mismatch
+
+The PostgreSQL image applies POSTGRES_PASSWORD_FILE only when initializing an empty volume. Changing `.env`/SECRETS_DIR or regenerating secret files does not change credentials stored in an existing database. A newly generated auth secret also cannot decrypt existing TOTP data. Restore the original secret files and set SECRETS_DIR to their directory; keep DATA_ROOT pointing at the documents that belong to that database. Retry `BUILD_IMAGES=0 bash scripts/deploy.sh` if the existing compiled images are current.
+
+Use the same ENV_FILE and COMPOSE_PROJECT_NAME consistently across bootstrap/deploy/backup. A separate fresh installation requires a distinct Compose project, DATA_ROOT, secrets and unused proxy ports. Do not use `docker compose down -v` to fix authentication: it deletes persisted data. If original secrets are unavailable, use the documented trusted recovery/escrow process; do not assume new secret files restore MFA or database access.
 
 Use immutable RELEASE_TAG values and keep prior images. Building on ARM targets linux/amd64 via Compose build platforms. Transfer without a registry:
 
