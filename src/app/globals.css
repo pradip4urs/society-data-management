@@ -1,0 +1,66 @@
+@import "tailwindcss";
+:root {
+  --background: #f6f8fa;
+  --foreground: #172b36;
+}
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+button,
+a,
+input,
+select,
+textarea {
+  outline-offset: 3px;
+}
+button:not(:disabled),
+select {
+  cursor: pointer;
+}
+.panel {
+  border: 1px solid #e2e8f0;
+  background: white;
+  border-radius: 14px;
+  padding: 24px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  border: 1px solid #94a3b8;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: white;
+  font-size: 16px;
+  font-weight: 400;
+  color: #172b36;
+  min-height: 44px;
+}
+.error {
+  color: #991b1b;
+  font-size: 14px;
+  font-weight: 500;
+}
+.badge {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .panel {
+    padding: 18px;
+  }
+}

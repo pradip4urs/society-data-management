@@ -1,0 +1,302 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+datasource db {
+  provider = "postgresql"
+}
+enum Role {
+  ADMIN
+  CASHIER
+  RESIDENT
+  SECURITY
+  AUDITOR
+}
+enum Classification {
+  OWNER_OCCUPIED
+  TENANT_OCCUPIED
+  VACANT
+  UNSOLD
+}
+enum AllocationType {
+  OWNED
+  RENTED
+  SOCIETY_ALLOTTED
+}
+model User {
+  id               String   @id
+  name             String
+  email            String   @unique
+  emailVerified    Boolean  @default(false)
+  image            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  twoFactorEnabled Boolean  @default(false)
+  sessions         Session[]
+  accounts         Account[]
+  twoFactors       TwoFactor[]
+  memberships      SocietyMembership[]
+  @@map("user")
+}
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@map("session")
+}
+model Account {
+  id                     String   @id
+  accountId              String
+  providerId             String
+  userId                 String
+  user                   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken            String?
+  refreshToken           String?
+  idToken                String?
+  accessTokenExpiresAt    DateTime?
+  refreshTokenExpiresAt   DateTime?
+  scope                  String?
+  password               String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("account")
+}
+model Verification {
+  id         String @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  @@index([identifier])
+  @@map("verification")
+}
+model TwoFactor {
+  id          String @id
+  secret      String
+  backupCodes String
+  verified    Boolean @default(false)
+  failedVerificationCount Int @default(0)
+  lockedUntil DateTime?
+  userId      String
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@map("twoFactor")
+}
+model Society {
+  id               String @id @default(uuid())
+  name             String
+  securityEnabled  Boolean @default(false)
+  securityVehicles Boolean @default(false)
+  createdAt        DateTime @default(now())
+  memberships      SocietyMembership[]
+  phases           Phase[]
+  blocks           Block[]
+  flats            Flat[]
+  persons          Person[]
+  ownerships       Ownership[]
+  occupancies      Occupancy[]
+  grants           ResidentAccessGrant[]
+  slots            ParkingSlot[]
+  entitlements     ParkingEntitlement[]
+  allocations      ParkingAllocation[]
+  vehicles         Vehicle[]
+  auditEvents      AuditEvent[]
+}
+model SocietyMembership {
+  id        String @id @default(uuid())
+  societyId String
+  userId    String
+  personId  String?
+  role      Role
+  active    Boolean @default(true)
+  society   Society @relation(fields: [societyId], references: [id])
+  user      User @relation(fields: [userId], references: [id])
+  person    Person? @relation(fields: [societyId, personId], references: [societyId, id])
+  grants    ResidentAccessGrant[]
+  @@unique([societyId, id])
+  @@unique([societyId, userId])
+  @@unique([societyId, personId])
+}
+model Phase {
+  id        String @id @default(uuid())
+  societyId String
+  name      String
+  society   Society @relation(fields: [societyId], references: [id])
+  blocks    Block[]
+  @@unique([societyId, id])
+  @@unique([societyId, name])
+}
+model Block {
+  id        String @id @default(uuid())
+  societyId String
+  phaseId   String
+  name      String
+  society   Society @relation(fields: [societyId], references: [id])
+  phase     Phase @relation(fields: [societyId, phaseId], references: [societyId, id])
+  flats     Flat[]
+  @@unique([societyId, id])
+  @@unique([societyId, phaseId, name])
+}
+model Flat {
+  id               String @id @default(uuid())
+  societyId        String
+  blockId          String
+  number           String
+  floor            Int
+  flatType         String
+  areaSqFt         Decimal @db.Decimal(12, 3)
+  billableAreaSqFt Decimal @db.Decimal(12, 3)
+  areaBasis        String
+  classification   Classification @default(VACANT)
+  internalRemarks  String @default("")
+  residentRemarks  String @default("")
+  society          Society @relation(fields: [societyId], references: [id])
+  block            Block @relation(fields: [societyId, blockId], references: [societyId, id])
+  ownerships       Ownership[]
+  occupancies      Occupancy[]
+  grants           ResidentAccessGrant[]
+  entitlements     ParkingEntitlement[]
+  allocations      ParkingAllocation[]
+  vehicles         Vehicle[]
+  @@unique([societyId, id])
+  @@unique([societyId, blockId, number])
+}
+model Person {
+  id            String @id @default(uuid())
+  societyId     String
+  name          String
+  email         String?
+  phone         String?
+  approvedPhone String?
+  internalNotes String @default("")
+  society       Society @relation(fields: [societyId], references: [id])
+  memberships   SocietyMembership[]
+  ownerships    Ownership[]
+  occupancies   Occupancy[]
+  @@unique([societyId, id])
+}
+model Ownership {
+  id        String @id @default(uuid())
+  societyId String
+  flatId    String
+  personId  String
+  startsOn  DateTime @db.Date
+  endsOn    DateTime? @db.Date
+  society   Society @relation(fields: [societyId], references: [id])
+  flat      Flat @relation(fields: [societyId, flatId], references: [societyId, id])
+  person    Person @relation(fields: [societyId, personId], references: [societyId, id])
+  @@unique([societyId, id])
+  @@index([societyId, flatId])
+}
+model Occupancy {
+  id        String @id @default(uuid())
+  societyId String
+  flatId    String
+  personId  String
+  startsOn  DateTime @db.Date
+  endsOn    DateTime? @db.Date
+  kind      String
+  society   Society @relation(fields: [societyId], references: [id])
+  flat      Flat @relation(fields: [societyId, flatId], references: [societyId, id])
+  person    Person @relation(fields: [societyId, personId], references: [societyId, id])
+  grants    ResidentAccessGrant[]
+  @@unique([societyId, id])
+  @@unique([societyId, id, flatId])
+  @@index([societyId, flatId])
+}
+model ResidentAccessGrant {
+  id                  String @id @default(uuid())
+  societyId           String
+  membershipId        String
+  flatId              String
+  occupancyId         String?
+  startsOn            DateTime @db.Date
+  endsOn              DateTime? @db.Date
+  revokedAt           DateTime?
+  historicalDocuments Boolean @default(false)
+  society             Society @relation(fields: [societyId], references: [id])
+  membership          SocietyMembership @relation(fields: [societyId, membershipId], references: [societyId, id])
+  flat                Flat @relation(fields: [societyId, flatId], references: [societyId, id])
+  occupancy           Occupancy? @relation(fields: [societyId, occupancyId, flatId], references: [societyId, id, flatId])
+  @@unique([societyId, id])
+  @@index([societyId, membershipId, revokedAt])
+}
+model ParkingSlot {
+  id           String @id @default(uuid())
+  societyId    String
+  label        String
+  location     String
+  type         String
+  society      Society @relation(fields: [societyId], references: [id])
+  entitlements ParkingEntitlement[]
+  allocations  ParkingAllocation[]
+  @@unique([societyId, id])
+  @@unique([societyId, label])
+}
+model ParkingEntitlement {
+  id        String @id @default(uuid())
+  societyId String
+  slotId    String
+  flatId    String
+  startsOn  DateTime @db.Date
+  endsOn    DateTime? @db.Date
+  basis     String
+  society   Society @relation(fields: [societyId], references: [id])
+  slot      ParkingSlot @relation(fields: [societyId, slotId], references: [societyId, id])
+  flat      Flat @relation(fields: [societyId, flatId], references: [societyId, id])
+  @@unique([societyId, id])
+}
+model ParkingAllocation {
+  id          String @id @default(uuid())
+  societyId   String
+  slotId      String
+  flatId      String
+  type        AllocationType
+  startsOn    DateTime @db.Date
+  endsOn      DateTime? @db.Date
+  rentalTerms String?
+  society     Society @relation(fields: [societyId], references: [id])
+  slot        ParkingSlot @relation(fields: [societyId, slotId], references: [societyId, id])
+  flat        Flat @relation(fields: [societyId, flatId], references: [societyId, id])
+  vehicles    Vehicle[]
+  @@unique([societyId, id])
+  @@unique([societyId, id, flatId])
+  @@index([societyId, flatId])
+}
+model Vehicle {
+  id           String @id @default(uuid())
+  societyId    String
+  flatId       String
+  allocationId String?
+  registration String
+  type         String
+  color        String
+  society      Society @relation(fields: [societyId], references: [id])
+  flat         Flat @relation(fields: [societyId, flatId], references: [societyId, id])
+  allocation   ParkingAllocation? @relation(fields: [societyId, allocationId, flatId], references: [societyId, id, flatId])
+  @@unique([societyId, id])
+  @@unique([societyId, registration])
+}
+model AuditEvent {
+  id         String @id @default(uuid())
+  societyId  String
+  actorId    String
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json @default("{}")
+  createdAt  DateTime @default(now())
+  society    Society @relation(fields: [societyId], references: [id])
+  @@unique([societyId, id])
+  @@index([societyId, createdAt])
+}

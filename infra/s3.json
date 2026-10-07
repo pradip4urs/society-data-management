@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "local-society-storage",
+      "credentials": [
+        {
+          "accessKey": "local_storage",
+          "secretKey": "local_storage_only_change_me"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

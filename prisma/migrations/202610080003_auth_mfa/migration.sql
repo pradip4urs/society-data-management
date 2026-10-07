@@ -1,0 +1,3 @@
+ALTER TABLE "twoFactor" ADD COLUMN "verified" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "twoFactor" ADD COLUMN "failedVerificationCount" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "twoFactor" ADD COLUMN "lockedUntil" TIMESTAMP(3);

@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:18.3-alpine
+    environment:
+      POSTGRES_DB: society
+      POSTGRES_USER: society
+      POSTGRES_PASSWORD: society_local_only
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U society -d society"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:8.2.2-alpine
+    ports: ["127.0.0.1:6379:6379"]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis_data:/data"]
+  storage:
+    image: chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
+    environment:
+      DEBUG: "false"
+    command:
+      [
+        "mini",
+        "-dir=/data",
+        "-ip=storage",
+        "-ip.bind=0.0.0.0",
+        "-s3.port=9000",
+        "-s3.config=/etc/seaweedfs/s3.json",
+        "-bucket=society-private",
+        "-admin.ui=false",
+        "-webdav=false",
+        "-s3.port.iceberg=0",
+        "-s3.port.lance=0",
+      ]
+    ports: ["127.0.0.1:9000:9000"]
+    volumes: ["storage_data:/data", "./infra/s3.json:/etc/seaweedfs/s3.json:ro"]
+  mailpit:
+    image: axllent/mailpit:v1.27.8
+    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
+  clamav:
+    image: clamav/clamav:1.4.3
+    ports: ["127.0.0.1:3310:3310"]
+    volumes: ["clamav_data:/var/lib/clamav"]
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
+  clamav_data:
