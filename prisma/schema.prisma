@@ -111,6 +111,7 @@ model Society {
   allocations      ParkingAllocation[]
   vehicles         Vehicle[]
   auditEvents      AuditEvent[]
+  attachments      Attachment[]
 }
 model SocietyMembership {
   id        String @id @default(uuid())
@@ -168,6 +169,7 @@ model Flat {
   entitlements     ParkingEntitlement[]
   allocations      ParkingAllocation[]
   vehicles         Vehicle[]
+  attachments      Attachment[]
   @@unique([societyId, id])
   @@unique([societyId, blockId, number])
 }
@@ -281,11 +283,37 @@ model Vehicle {
   registration String
   type         String
   color        String
+  make         String @default("")
+  model        String @default("")
   society      Society @relation(fields: [societyId], references: [id])
   flat         Flat @relation(fields: [societyId, flatId], references: [societyId, id])
   allocation   ParkingAllocation? @relation(fields: [societyId, allocationId, flatId], references: [societyId, id, flatId])
   @@unique([societyId, id])
   @@unique([societyId, registration])
+}
+enum ScanStatus {
+  QUARANTINED
+  CLEAN
+  REJECTED
+}
+model Attachment {
+  id              String @id @default(uuid())
+  societyId       String
+  flatId          String
+  creatorId       String
+  originalName    String
+  mimeType        String
+  byteSize        Int
+  sha256          String
+  status          ScanStatus @default(QUARANTINED)
+  residentVisible Boolean @default(false)
+  audienceMembershipIds String[] @default([])
+  createdAt       DateTime @default(now())
+  scannedAt       DateTime?
+  society         Society @relation(fields: [societyId], references: [id])
+  flat            Flat @relation(fields: [societyId, flatId], references: [societyId, id])
+  @@unique([societyId, id])
+  @@index([status, createdAt])
 }
 model AuditEvent {
   id         String @id @default(uuid())

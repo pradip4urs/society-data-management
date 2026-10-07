@@ -3,6 +3,7 @@ import { body, checkOrigin, context, failure, json } from "@/server/http";
 import { rateLimit } from "@/server/rate-limit";
 import * as service from "@/server/services";
 import { missing } from "@/server/errors";
+import { backupStatus } from "@/server/backup-status";
 type Params = { params: Promise<{ societyId: string; path: string[] }> };
 export async function GET(request: Request, args: Params) {
   try {
@@ -20,6 +21,8 @@ export async function GET(request: Request, args: Params) {
     if (path.length > 2) throw missing();
     if (path[0] !== "flats" && path.length !== 1) throw missing();
     switch (path[0]) {
+      case "backup-status":
+        return json(await backupStatus(ctx));
       case "flats":
         return json(
           path[1]

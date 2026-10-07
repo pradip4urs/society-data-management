@@ -4,9 +4,10 @@ export {};
 const images = [
   "library/postgres:18.3-alpine",
   "library/redis:8.2.2-alpine",
-  "chrislusf/seaweedfs:4.48",
+  "library/caddy:2.10.2-alpine",
+  "library/node:24.18.1-bookworm-slim",
   "axllent/mailpit:v1.27.8",
-  "clamav/clamav:1.4.3",
+  "clamav/clamav:1.4.6",
 ];
 for (const image of images) {
   const [repository, tag] = image.split(":");

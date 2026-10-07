@@ -24,7 +24,7 @@ Sign in; enroll privileged-role MFA; select a society; view a role dashboard and
 
 ## Deferred workflows
 
-Invoices, ledger, payments, downloads/uploads, billing accounts, gateway integrations, reports/exports, complaints, vendors, assets, notifications and recovery automation. Navigation identifies planned modules without pretending these workflows work.
+Invoices, ledger, payments, billing accounts, gateway integrations, reports/exports, complaints, vendors, assets and notifications. Navigation identifies planned modules without pretending these workflows work. Revised Stage1 implements private flat document quarantine/downloads, audited host MFA recovery, encrypted backups and fresh-stack restore; finance document access remains a separate unconfirmed policy.
 
 ## Acceptance
 

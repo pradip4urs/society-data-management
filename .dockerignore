@@ -1,0 +1,17 @@
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.example
+.local
+secrets
+data
+backups
+*.age
+dist
+test-results
+playwright-report
+coverage
+src/generated
+*.tsbuildinfo

@@ -13,6 +13,7 @@ export function Login() {
   const [error, setError] = useState("");
   const [twoFactor, setTwoFactor] = useState(false);
   const [code, setCode] = useState("");
+  const [recovery, setRecovery] = useState(false);
   const form = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
   });
@@ -70,7 +71,9 @@ export function Login() {
             <form
               onSubmit={async (event) => {
                 event.preventDefault();
-                const result = await authClient.twoFactor.verifyTotp({ code });
+                const result = recovery
+                  ? await authClient.twoFactor.verifyBackupCode({ code })
+                  : await authClient.twoFactor.verifyTotp({ code });
                 if (result.error)
                   setError(result.error.message ?? "Verification failed");
                 else {
@@ -81,16 +84,26 @@ export function Login() {
               className="space-y-5"
             >
               <label className="field">
-                Authenticator code
+                {recovery ? "Recovery code" : "Authenticator code"}
                 <input
                   required
-                  inputMode="numeric"
+                  inputMode={recovery ? "text" : "numeric"}
                   autoComplete="one-time-code"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                 />
               </label>
               <Button type="submit">Verify and sign in</Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setRecovery(!recovery);
+                  setCode("");
+                }}
+              >
+                {recovery ? "Use authenticator" : "Use a recovery code"}
+              </Button>
             </form>
           ) : (
             <form className="space-y-5" onSubmit={form.handleSubmit(signIn)}>

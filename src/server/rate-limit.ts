@@ -2,7 +2,8 @@ import Redis from "ioredis";
 import { createHash } from "node:crypto";
 import { DomainError } from "./errors";
 import type { BetterAuthRateLimitStorage } from "better-auth";
-const redis = new Redis(process.env.REDIS_URL ?? "redis://127.0.0.1:6379", {
+import { redisUrl } from "./config";
+const redis = new Redis(redisUrl(), {
   lazyConnect: true,
   maxRetriesPerRequest: 1,
   enableOfflineQueue: false,

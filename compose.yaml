@@ -1,51 +1,202 @@
+name: ${COMPOSE_PROJECT_NAME:-society}
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+x-app-env: &app-env
+  NODE_ENV: production
+  BETTER_AUTH_URL: ${APP_URL:-https://localhost}
+  BETTER_AUTH_SECRET_FILE: /run/secrets/auth_secret
+  DB_HOST: postgres
+  DB_NAME: society
+  DB_USER: society_app
+  DB_PASSWORD_FILE: /run/secrets/db_app_password
+  REDIS_HOST: redis
+  REDIS_PASSWORD_FILE: /run/secrets/redis_password
+  DOCUMENT_ROOT: /documents
+  CLAMAV_HOST: clamav
+  BACKUP_STATUS_FILE: /backup-status/status.json
 services:
+  caddy:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    environment:
+      {
+        SITE_ADDRESS: "${SITE_ADDRESS:-localhost}",
+        TLS_MODE: "${TLS_MODE:-tls internal}",
+      }
+    ports:
+      [
+        "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-80}:80",
+        "${HTTPS_BIND:-127.0.0.1}:${HTTPS_PORT:-443}:443",
+      ]
+    volumes:
+      [
+        "./infra/Caddyfile:/etc/caddy/Caddyfile:ro",
+        "caddy_data:/data",
+        "caddy_config:/config",
+      ]
+    networks: [edge]
+    restart: unless-stopped
+    logging: *logging
+    depends_on: { web: { condition: service_healthy } }
+  web:
+    image: society-web:${RELEASE_TAG:-local}
+    build:
+      { context: ., dockerfile: Dockerfile.web, platforms: ["linux/amd64"] }
+    environment: *app-env
+    secrets: [auth_secret, db_app_password, redis_password]
+    volumes:
+      [
+        "${DATA_ROOT:-./data}/documents:/documents",
+        "${DATA_ROOT:-./data}/backup-status:/backup-status:ro",
+      ]
+    networks: [edge, backend]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:size=64m", "/app/.next/cache:uid=1000,gid=1000,size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      {
+        postgres: { condition: service_healthy },
+        redis: { condition: service_healthy },
+      }
+  worker:
+    image: society-worker:${RELEASE_TAG:-local}
+    build:
+      {
+        context: .,
+        dockerfile: Dockerfile.worker,
+        target: runtime,
+        platforms: ["linux/amd64"],
+      }
+    environment: *app-env
+    secrets: [auth_secret, db_app_password, redis_password]
+    volumes: ["${DATA_ROOT:-./data}/documents:/documents"]
+    networks: [backend]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "const fs=require('fs');try{process.exit(Date.now()-Number(fs.readFileSync('/tmp/worker-heartbeat','utf8'))<45000?0:1)}catch{process.exit(1)}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    depends_on:
+      {
+        postgres: { condition: service_healthy },
+        redis: { condition: service_healthy },
+      }
+  operator:
+    image: society-operator:${RELEASE_TAG:-local}
+    build:
+      {
+        context: .,
+        dockerfile: Dockerfile.worker,
+        target: operator,
+        platforms: ["linux/amd64"],
+      }
+    profiles: [tools]
+    environment: *app-env
+    secrets: [auth_secret, db_app_password, redis_password, db_owner_password]
+    volumes: ["${DATA_ROOT:-./data}/documents:/documents"]
+    networks: [backend]
   postgres:
     image: postgres:18.3-alpine
     environment:
-      POSTGRES_DB: society
-      POSTGRES_USER: society
-      POSTGRES_PASSWORD: society_local_only
-    ports: ["127.0.0.1:5432:5432"]
-    volumes: ["postgres_data:/var/lib/postgresql"]
+      {
+        POSTGRES_DB: society,
+        POSTGRES_USER: society_owner,
+        POSTGRES_PASSWORD_FILE: /run/secrets/db_owner_password,
+      }
+    secrets: [db_owner_password, db_app_password]
+    volumes:
+      [
+        "postgres_data:/var/lib/postgresql",
+        "./infra/postgres-init.sh:/docker-entrypoint-initdb.d/01-runtime.sh:ro",
+      ]
+    networks: [backend]
+    restart: unless-stopped
+    logging: *logging
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U society -d society"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+      {
+        test: [CMD-SHELL, "pg_isready -U society_owner -d society"],
+        interval: 5s,
+        timeout: 5s,
+        retries: 20,
+      }
   redis:
     image: redis:8.2.2-alpine
-    ports: ["127.0.0.1:6379:6379"]
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes: ["redis_data:/data"]
-  storage:
-    image: chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
-    environment:
-      DEBUG: "false"
-    command:
+    entrypoint:
       [
-        "mini",
-        "-dir=/data",
-        "-ip=storage",
-        "-ip.bind=0.0.0.0",
-        "-s3.port=9000",
-        "-s3.config=/etc/seaweedfs/s3.json",
-        "-bucket=society-private",
-        "-admin.ui=false",
-        "-webdav=false",
-        "-s3.port.iceberg=0",
-        "-s3.port.lance=0",
+        /bin/sh,
+        -c,
+        'exec redis-server --appendonly yes --requirepass "$$(cat /run/secrets/redis_password)"',
       ]
-    ports: ["127.0.0.1:9000:9000"]
-    volumes: ["storage_data:/data", "./infra/s3.json:/etc/seaweedfs/s3.json:ro"]
-  mailpit:
-    image: axllent/mailpit:v1.27.8
-    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
+    secrets: [redis_password]
+    volumes: ["redis_data:/data"]
+    networks: [backend]
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      {
+        test:
+          [
+            CMD-SHELL,
+            "REDISCLI_AUTH=$$(cat /run/secrets/redis_password) redis-cli ping | grep PONG",
+          ],
+        interval: 5s,
+        timeout: 5s,
+        retries: 20,
+      }
   clamav:
-    image: clamav/clamav:1.4.3
-    ports: ["127.0.0.1:3310:3310"]
+    image: clamav/clamav:1.4.6@sha256:57deb108fc4c72778aa83eafbca7bb7153e28c3f57c005afd38d31f16da86f23
     volumes: ["clamav_data:/var/lib/clamav"]
+    networks: [backend, scanner_updates]
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 2g
+    healthcheck:
+      {
+        test: [CMD-SHELL, "clamdcheck.sh"],
+        interval: 30s,
+        timeout: 10s,
+        retries: 30,
+        start_period: 120s,
+      }
+networks:
+  edge:
+  backend: { internal: true }
+  scanner_updates:
 volumes:
   postgres_data:
   redis_data:
-  storage_data:
   clamav_data:
+  caddy_data:
+  caddy_config:
+secrets:
+  auth_secret: { file: "${SECRETS_DIR:-./secrets}/auth_secret" }
+  db_owner_password: { file: "${SECRETS_DIR:-./secrets}/db_owner_password" }
+  db_app_password: { file: "${SECRETS_DIR:-./secrets}/db_app_password" }
+  redis_password: { file: "${SECRETS_DIR:-./secrets}/redis_password" }

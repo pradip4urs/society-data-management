@@ -47,6 +47,30 @@ export async function body(request: Request) {
     throw new DomainError(400, "Invalid JSON");
   }
 }
+export async function multipart(request: Request) {
+  const reader = request.body?.getReader();
+  if (!reader) throw new DomainError(400, "Upload body is required");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    size += chunk.value.length;
+    if (size > 10500000) {
+      await reader.cancel();
+      throw new DomainError(413, "Upload is too large");
+    }
+    chunks.push(chunk.value);
+  }
+  const data = Buffer.concat(chunks);
+  try {
+    return await new Response(data, {
+      headers: { "Content-Type": request.headers.get("content-type") ?? "" },
+    }).formData();
+  } catch {
+    throw new DomainError(400, "Invalid multipart upload");
+  }
+}
 export function failure(error: unknown) {
   if (error instanceof DomainError)
     return json({ error: error.message }, error.status);

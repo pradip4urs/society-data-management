@@ -9,6 +9,7 @@ import {
 } from "./permissions";
 import { DomainError, missing } from "./errors";
 import * as v from "./validation";
+import { parseFlatCsv } from "./csv-import";
 type Tx = Prisma.TransactionClient;
 export async function audit(
   tx: Tx,
@@ -227,7 +228,15 @@ export async function listParking(ctx: Context) {
       flat: {
         select: { id: true, number: true, block: { select: { name: true } } },
       },
-      vehicles: { select: { registration: true, type: true, color: true } },
+      vehicles: {
+        select: {
+          registration: true,
+          type: true,
+          color: true,
+          make: true,
+          model: true,
+        },
+      },
     },
   });
   const entitlements =
@@ -578,7 +587,11 @@ export async function revokeGrant(ctx: Context, grantId: string) {
 }
 export async function importFlats(ctx: Context, input: unknown) {
   requireCapability(ctx, "master.write");
-  const { rows, commit } = v.importInput.parse(input);
+  const { rows, commit } = v.importInput.parse(
+    typeof input === "object" && input !== null && "csv" in input
+      ? parseFlatCsv(input)
+      : input,
+  );
   const keys = rows.map((row) => row.blockId + ":" + row.number);
   if (new Set(keys).size !== keys.length)
     throw new DomainError(400, "Duplicate flat numbers in import");

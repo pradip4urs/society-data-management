@@ -1,35 +1,27 @@
 # Architecture and decisions
 
-## ADR 001: stack and boundaries
+The maintained Next.js 16.4 App Router/TypeScript modular monolith uses thin APIs, server-side domain services and explicit DTO projections. Better Auth owns password hashing, TOTP/challenges and sessions. Prisma/PostgreSQL owns transactions, constraints and evidence. Tailwind/local shadcn-style Radix components, RHF/Zod and TanStack Table provide the UI. Versions are pinned in package.json/lockfile.
 
-No existing code or stack was found. Use Next.js App Router/TypeScript, Tailwind and local shadcn-style accessible Radix components, React Hook Form/Zod and TanStack Table; PostgreSQL with Prisma. Select stable packages explicitly (Prisma 7 rather than the registry's 8 release candidate) and commit package-lock.json. Record installed versions in package.json.
+## Single-host topology
 
-The modular monolith has thin route handlers and server-only domain services in src/server. Authorization creates a fresh society context using the authenticated session and live membership. Services receive this context and enforce capabilities and row scope. DTOs are explicit projections. PostgreSQL composite foreign keys enforce society consistency even if application checks fail.
+Browser → Caddy HTTPS → compiled standalone non-root web. PostgreSQL18, password-protected Redis8, compiled BullMQ/scan worker and ClamAV1.4.6 run on internal backend networks. Only Caddy proxy ports publish in production. Scanner has outbound signature update access; web serves no external auth/payment/email dependency. Private bind-mounted documents replace earlier S3/SeaweedFS; no Azure managed service, Kubernetes or registry is required. The same AMD64 images/topology run locally and on one Ubuntu VM.
 
-## ADR 002: authentication
+Web/worker are read-only non-root with temporary folders and least-privilege mounts. No Docker socket is mounted. Secrets arrive as mounted files, not image layers. Postgres owner is available only to one-off migration/operator steps; runtime society_app cannot create schema objects, update/delete audit evidence or delete history/documents. Deployment/backup/restore serialize using host flock. App startup does not migrate.
 
-Better Auth owns passwords, HttpOnly sessions, CSRF/origin checking and TOTP enrollment. Public signup is disabled; users are provisioned by an operator. No membership or resident grant is embedded in a long-lived token. Session cookie caching is disabled. Privileged roles ADMIN/CASHIER/AUDITOR require TOTP in production; the explicit development-only MFA bypass is rejected in production. Enrollment is accessible without business permissions. MFA recovery and identity verification require an operator runbook and must not be bypassed by assigning a different role.
+## Authorization/evidence
 
-## ADR 003: isolation and evidence
+Authenticated session → fresh live society membership/MFA → capability → strict Zod input → record/field scoped service → transaction with audit → minimized response. Composite foreign keys enforce same-society relationships. Admin business mutation cannot rewrite audit. Resident grants support multiple users/flats, are date-bound and live; move-out revokes linked grants immediately. Security lookup has its own explicit field SELECT allowlist and admin-off defaults. Redis throttling fails closed; Caddy overwrites forwarding IP/protocol headers.
 
-All society-owned tables carry societyId and composite keys. A record's ID alone is never authority. API, worker and future storage/export services must repeat live authorization. Runtime DB credentials must not have schema-owner rights in production. PostgreSQL triggers make audit append-only; the operational DB role cannot bypass triggers. Application logs omit request payloads and personal data.
+Better Auth cookie cache is disabled. Production privileged roles require MFA; bypass/mock flags cause startup failure. Supported Better Auth middleware/storage extension hashes random recovery codes while retaining library generation/challenge/atomic consumption; successful recovery use is audited. First-admin bootstrap is a serialized empty-installation CLI with password stdin. Trusted operator MFA recovery requires externally verified identity/reason and revokes sessions. No public signup/email dependency.
 
-## ADR 004: infrastructure
+## Files and worker
 
-Compose provides PostgreSQL, Redis, private SeaweedFS S3, Mailpit and ClamAV. A separate BullMQ worker runs a non-sensitive infrastructure probe only in Stage 1; business jobs/outbox arrive with Stage 2. No payment mock or provider is implemented in this stage. Email is captured locally; production SMTP must be configured. No attachment upload/download endpoint is exposed until quarantine, scanning and authorization are complete.
+Random document IDs never expose user paths. PDFs/PNGs/JPEGs are limited to 10 MiB and society quota1GiB, declared/magic types checked, safe forced-download filename and no-store. Stale/unavailable scanner blocks uploads. New content enters private quarantine; PostgreSQL queued rows/row locks govern workers, with crash recovery after filesystem rename. Hash-verified clean files alone are downloadable. Immutable content/audience prevents earlier occupant document inheritance; live flat grants also apply. Admin may upload; unrelated roles are denied. Rejected files remain private for later approved retention handling. Transaction rollback can leave a private orphan; review controlled reconciliation/retention before large use, never serve orphan paths.
 
-SeaweedFS 4.48 replaces the initially considered MinIO containers after registry access failed for those images. Official release source confirms mini-mode flags, pre-created bucket support and explicit S3 credential identities. No anonymous identity is configured. The native 4.48 build was exercised locally; Docker Compose runtime remains unverified. Only the S3 port is published in Compose; WebDAV is disabled.
+Redis holds counters and infrastructure probe jobs only. Scheduled finance/export/outbox jobs are pending and must add DB source-of-truth recovery/catch-up. Controlled Playwright rendering/egress/resource limits belong to Stage3; no arbitrary rendering endpoint exists.
 
-ESLint 9.39.5 is retained because the current Next.js React/import/accessibility plugins do not support ESLint 10. Prisma's vulnerable tooling dependencies are overridden to current stable deepmerge-ts/mysql2 releases and validated with migrations/build/tests. Full npm audit still reports the braces/glob developer-tool chain (no patched braces release available); production dependency audit is clean at this checkpoint. Review before production and do not pass untrusted glob patterns to tooling.
+## Backup and limits
 
-## Request path
+Write maintenance window creates consistent logical DB dump/document tar with manifest/hash checks, age public-recipient encryption and retention. Host timer requires no socket in an app container. Fresh-stack restore verifies exact release, counts, document hashes, revokes sessions and runs migrations before startup. Same-host copies need separate off-host download/key escrow to survive VM loss.
 
-Browser → Better Auth session → membership/MFA/capability → Zod input → scoped service → transaction (business mutation + audit) → minimized DTO. API responses use no-store and same-origin mutation checks; Redis limits authenticate-sensitive and security-directory operations, failing closed when unavailable.
-
-## PWA and rendering
-
-App data is fetched dynamically with no-store. Service worker caches only /offline.html and static icons. It never intercepts authenticated page/API requests for cache storage. UI uses native labels, keyboard-operable controls, explicit text statuses, focus management and mobile navigation.
-
-## Limits
-
-No financial modules or production deployment is implied by this foundation. Stage 1 import is synchronous and limited. Audit reads are bounded. Directory and parking are bounded/paginated. Production MFA, backups, least-privilege credentials, dependency/security review, TLS, Redis isolation, monitoring and independent accessibility review are deployment gates.
+PWA caches only public offline assets; all private requests remain online/no-store. CSP currently permits framework inline scripts/styles; nonce tightening needs independent review. UI selectors/parking views are bounded. Stage2–5 finance/report/operational modules and production operational acceptance remain outstanding. ESLint9 is retained for supported React/import plugin peers despite end of maintenance; developer-tool braces/glob advisories are unresolved and must be reviewed before production. Production npm dependencies currently audit clean.

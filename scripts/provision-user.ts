@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
 import { db } from "../src/server/db";
 import { z } from "zod";
-// Operator CLI only; no public signup endpoint. Password supplied via environment, never command args.
+// Operator CLI only; password on stdin (legacy local environment fallback), never command args.
+let stdinPassword = "";
+for await (const chunk of process.stdin) {
+  stdinPassword += chunk.toString();
+  if (stdinPassword.length > 256) throw new Error("Password input too long");
+}
 const data = z
   .object({
     email: z.email(),
@@ -16,7 +21,7 @@ const data = z
   .parse({
     email: process.env.PROVISION_EMAIL,
     name: process.env.PROVISION_NAME,
-    password: process.env.PROVISION_PASSWORD,
+    password: stdinPassword.trimEnd() || process.env.PROVISION_PASSWORD,
     societyId: process.env.PROVISION_SOCIETY_ID,
     role: process.env.PROVISION_ROLE ?? "RESIDENT",
     personId: process.env.PROVISION_PERSON_ID,

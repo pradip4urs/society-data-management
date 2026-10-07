@@ -17,3 +17,7 @@ Dates use DATE and end-exclusive intervals. endedAt must exceed startedAt; alloc
 ## Planned model
 
 Stage 2 adds MaintenanceRate, BillingRun, BillingAccount, Invoice/InvoiceLine, Account, JournalEntry/JournalLine, Payment/PaymentAllocation, Receipt, CreditNote, Refund, Expense, VendorBill, Voucher, FinancialPeriod and ApprovalRequest with immutable posting/snapshot constraints. Stage 3 adds GatewayEvent/Settlement, ReconciliationRecord, SavedReport, ExportJob, Attachment and durable outbox. Stage 4 adds Vendor/Review, Asset/MaintenanceSchedule/WorkOrder, Complaint/Comment, Contact and Notification. Tables are deliberately not scaffolded without their transactional invariants.
+
+## Revised single-host foundation
+
+Attachment is now implemented: random ID, same-society flat FK, creator, safe original name, MIME/size/SHA-256, quarantine/clean/rejected state, created/scanned times, resident-visible flag and immutable membership audience snapshot. Content/scope/audience cannot be mutated. Download requires CLEAN plus current flat access and captured membership; a new occupant gets no older files. Private content is stored outside public/ on persistent filesystem mounts. Vehicle now includes make/model. Better Auth recovery codes use SHA-256 hashes through its supported storage extension, with library atomic single-use consumption. No financial snapshot/account models have been introduced prematurely.

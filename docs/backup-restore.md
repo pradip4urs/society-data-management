@@ -1,37 +1,57 @@
-# Backup and restore runbook
+# Encrypted backup and restore
 
-Stage 1 stores data in PostgreSQL. Redis counters/probe jobs have no authoritative business evidence. No attachments or financial records are created yet. When documents/outbox exist, backup and restore must coordinate DB pointers, storage versions and event replay rules.
+## Consistency and recovery scope
 
-## Backup
+`scripts/backup.sh` takes a host operator lock shared with deployment/restore, stops web and worker for a maintenance window, takes a PostgreSQL custom-format logical dump, archives immutable private documents, and records row counts, schema migration names, image IDs/release/git manifest and SHA-256 checksums. Caddy stays up but requests receive temporary upstream-unavailable responses. It restarts only previously running writers on exit. Never copy a live PostgreSQL data directory as a general backup.
 
-Use PostgreSQL 18 client tools matching the server. Store encrypted backups away from the application host, with tightly scoped operator access and agreed retention. Set password using a secrets manager/pgpass or environment, never a command argument. Do not put credentials or resident data in logs.
+The resulting tar is encrypted with age to a public recipient before retention. Plaintext exists only in a private scoped temporary directory and is removed on exit. Default retention is 30 days. Backup status is recorded atomically in DATA_ROOT/backup-status/status.json; admin sees last complete/failed/unknown status under Audit trail. An old successful status must be treated as stale by operators; inspect timer/logs and timestamp.
 
-```powershell
-# Development Compose example; choose an encrypted external destination in production.
-New-Item -ItemType Directory -Force -Path .local/backups | Out-Null
-docker compose exec -T postgres pg_dump -U society -d society -Fc -f /tmp/society.dump
-docker compose cp postgres:/tmp/society.dump .local/backups/society.dump
+Redis counters/probes are disposable; PostgreSQL quarantine rows resume scanning after outages. Future financial/outbox jobs must remain DB authoritative and reconcile/catch up idempotently; they are not implemented yet.
+
+## Keys and schedule
+
+Generate the age identity on a separate trusted recovery machine; configure only its public recipient on the VM:
+
+```bash
+age-keygen -o society-backup-identity.key
+age-keygen -y society-backup-identity.key
+# Paste public recipient into BACKUP_RECIPIENT in .env on the VM.
+bash scripts/backup.sh
 ```
 
-The server-side file avoids Windows pipeline binary-encoding corruption. Record UTC backup time, release/schema version, checksum, encrypted object identifier and expected recovery point. Enable managed PITR/WAL archiving for production and regularly test restoration; target RPO/RTO must be agreed by the society before launch.
+Store the decryption identity separately from backups and from the VM. Escrow application auth encryption secret separately: restoring MFA requires the original BETTER_AUTH_SECRET. Keep encrypted offline escrow for all operational secrets plus .env/release inventory; secret files are deliberately excluded from the backup bundle. DB/Redis operational passwords can be new for a fresh restore. Do not rotate the auth encryption secret casually: it encrypts TOTP data and affects sessions.
 
-## Restore drill
+Install systemd units after adjusting /opt/society paths if needed:
 
-Create a separate empty database, restore without overwriting the source, and compare row counts/history/scoping and trigger/exclusion behavior. Use a safe name you explicitly created. Never drop or truncate live society data as part of a drill.
-
-```powershell
-docker compose exec -T postgres createdb -U society society_restore_drill
-docker compose exec -T postgres pg_restore -U society -d society_restore_drill --no-owner --exit-on-error /tmp/society.dump
-docker compose exec -T postgres psql -U society -d society_restore_drill -c 'SELECT count(*) FROM "Society";'
-docker compose exec -T postgres psql -U society -d society_restore_drill -c 'SELECT count(*) FROM "AuditEvent";'
+```bash
+sudo cp infra/society-backup.service infra/society-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now society-backup.timer
+systemctl list-timers society-backup.timer
+journalctl -u society-backup.service
 ```
 
-Inspect audit immutability and no_exclusive_parking_overlap on the restored database, check composite foreign keys, and compare counts to source. A restored auth database contains session/password/MFA evidence: isolate it from real users and invalidate restored sessions before enabling a recovery instance. Rotate operational credentials if compromise is suspected. Keep drill access private. Approval to delete a drill DB does not authorize deleting any other database.
+Timer runs daily at 02:30 Asia/Kolkata, catches missed executions after restart, and adds a short randomized delay. This incurs a write maintenance window. Agree an RPO (currently up to one day for a daily schedule) and measure RTO with real data.
 
-## Actual incident
+Same-VM backups do not protect against complete VM/disk loss. Download encrypted archive plus .sha256 off the VM with scp/rsync to separately protected storage; verify checksums on receipt. No managed storage is required. Keep the private decryption key offline. Test key usability periodically.
 
-Pause writes through controlled maintenance, identify last safe recovery point, restore to a fresh isolated instance, verify referential and evidence invariants, revoke old sessions, reconcile post-backup operations and then redirect traffic through the release gate. Preserve compromised/original evidence for investigation; do not silently rewrite audit history. Document data loss and affected parties under the approved retention/privacy process.
+## Fresh-stack restoration
 
-Automated production restore drills, managed PITR, storage restore and financial recovery acceptance tests are Stage 5 work. Local validation results are recorded in validation.md; this runbook alone is not proof of recoverability.
+Use a distinct .env.restore with COMPOSE_PROJECT_NAME containing `restore`, separate empty DATA_ROOT/BACKUP_ROOT, unused loopback proxy ports and matching APP_URL. Keep the backed-up exact RELEASE_TAG images loaded and the original auth secret from escrow. The script refuses existing containers/volumes/documents for that project; it never deletes an existing stack.
 
-`scripts/restore-drill.ts` is an optional Windows synthetic-only drill with live row-count/trigger/exclusion verification. It requires `PG_TOOLS_DIR` pointing to a PostgreSQL 18 client bin directory and a local seeded database. It creates a uniquely named target without deleting/overwriting a database. The embedded server package does not include pg_dump/pg_restore; the attempted drill in this run did not complete. A fresh empty `society_restore_drill` DB from the failed attempt is retained locally and has no production data. Do not treat it as a validated backup.
+```bash
+ENV_FILE=.env.restore bash scripts/restore.sh /absolute/society-TIME-ID.tar.age /absolute/offline-identity.key
+ENV_FILE=.env.restore CURL_CA_BUNDLE=/path/to/restored-caddy-public-root.crt bash scripts/verify.sh
+```
+
+Create the target secret files from escrow first; do not run bootstrap.sh against the restore target because it creates a documents directory and the restore intentionally refuses nonempty targets. Secret parent mode 0700, files readable by container UID1000. Restore can use new db_owner/db_app/redis passwords, but requires old auth secret. On an actual single host never reuse the source document directory/ports. Disposable test rehearsals may use the same synthetic secrets, explicitly confined to fictional data.
+
+Restore verifies outer/inner checksums and allowed archive entries, rejects document links/traversal/special files, matches image IDs, restores DB with pg_restore, compares row counts, restores document files/ownership, invalidates sessions, applies serialized migrations and verifies every referenced document hash before starting web/worker/Caddy. Exact image restoration is followed by separately reviewed upgrades. Use an isolated restored stack and verify login/TOTP, directory/permissions, document download, audit mutation rejection and parking conflict before cutover. Test invalid/expired sessions and process restarts. Restore fails closed on missing/corrupt referenced files.
+
+Checksums detect accidental corruption; protect backup/key permissions because checksums alone do not identify a trusted sender. A compromised host can alter application data and backups. Keep independent off-host copies and incident evidence.
+
+## Failure/rollback
+
+Failed restore preserves the source and may leave the separately named target partly restored; investigate and choose a new empty target for retry. Do not silently drop that target or any production volumes. Deployment migration failure leaves writers stopped. A destructive schema rollback may require restore and lose all writes since the recovery point; reconcile later transactions manually with auditable records after financial modules exist. Do not delete posted evidence.
+
+A synthetic encrypted backup/fresh-stack restore is recorded in validation.md. This is evidence of the foundation path, not production RPO/RTO or complete financial recoverability.

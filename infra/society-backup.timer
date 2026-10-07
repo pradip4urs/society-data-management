@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily society backup maintenance window
+[Timer]
+OnCalendar=*-*-* 02:30:00 Asia/Kolkata
+Persistent=true
+RandomizedDelaySec=120
+[Install]
+WantedBy=timers.target

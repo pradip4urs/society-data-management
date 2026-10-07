@@ -160,6 +160,10 @@ export function Workspace() {
   });
   const [profile, setProfile] = useState<Profile>(null);
   const [audits, setAudits] = useState<AuditRow[]>([]);
+  const [backupState, setBackupState] = useState<{
+    state: string;
+    updatedAt?: string;
+  }>({ state: "unknown" });
   const [security, setSecurity] = useState<SecurityRow[]>([]);
   const [securitySearched, setSecuritySearched] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -237,6 +241,8 @@ export function Workspace() {
         }
         if (view === "audit") {
           const data = await request<AuditRow[]>(endpoint("audit"));
+          if (role === "ADMIN")
+            setBackupState(await request(endpoint("backup-status")));
           if (!cancelled) setAudits(data);
         }
       } catch (e) {
@@ -961,6 +967,8 @@ export function Workspace() {
                           { name: "registration", label: "Registration" },
                           { name: "type", label: "Vehicle type" },
                           { name: "color", label: "Color" },
+                          { name: "make", label: "Make", optional: true },
+                          { name: "model", label: "Model", optional: true },
                         ]}
                         save={save("vehicles")}
                       />
@@ -1123,37 +1131,54 @@ export function Workspace() {
                 </>
               )}
               {view === "audit" && (
-                <section className="panel">
-                  <h2 className="mb-4 font-bold">
-                    Latest 100 append-only events
-                  </h2>
-                  {!audits.length && <p>No audit events yet.</p>}
-                  <div className="divide-y">
-                    {audits.map((a) => (
-                      <div
-                        key={a.id}
-                        className="flex flex-wrap justify-between gap-3 py-4"
-                      >
-                        <div>
-                          <strong className="text-sm">
-                            {a.action.replaceAll("_", " ")}
-                          </strong>
-                          <p className="mt-1 break-all text-xs text-slate-500">
-                            {a.entityType} · {a.entityId}
-                          </p>
+                <>
+                  {role === "ADMIN" && (
+                    <section className="panel mb-4">
+                      <h2 className="font-bold">Last encrypted backup</h2>
+                      <p className="mt-2">
+                        {backupState.state}
+                        {backupState.updatedAt
+                          ? ` · ${dateDisplay(backupState.updatedAt)}`
+                          : " · No recorded backup"}
+                      </p>
+                      <p className="mt-2 text-sm text-slate-500">
+                        Copies on this host require a separate off-host copy to
+                        survive VM loss.
+                      </p>
+                    </section>
+                  )}
+                  <section className="panel">
+                    <h2 className="mb-4 font-bold">
+                      Latest 100 append-only events
+                    </h2>
+                    {!audits.length && <p>No audit events yet.</p>}
+                    <div className="divide-y">
+                      {audits.map((a) => (
+                        <div
+                          key={a.id}
+                          className="flex flex-wrap justify-between gap-3 py-4"
+                        >
+                          <div>
+                            <strong className="text-sm">
+                              {a.action.replaceAll("_", " ")}
+                            </strong>
+                            <p className="mt-1 break-all text-xs text-slate-500">
+                              {a.entityType} · {a.entityId}
+                            </p>
+                          </div>
+                          <time className="text-xs text-slate-600">
+                            {new Intl.DateTimeFormat("en-IN", {
+                              timeZone: "Asia/Kolkata",
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            }).format(new Date(a.createdAt))}{" "}
+                            IST
+                          </time>
                         </div>
-                        <time className="text-xs text-slate-600">
-                          {new Intl.DateTimeFormat("en-IN", {
-                            timeZone: "Asia/Kolkata",
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                          }).format(new Date(a.createdAt))}{" "}
-                          IST
-                        </time>
-                      </div>
-                    ))}
-                  </div>
-                </section>
+                      ))}
+                    </div>
+                  </section>
+                </>
               )}
               {view === "profile" &&
                 (profile ? (
@@ -1238,6 +1263,14 @@ export function Workspace() {
                 />
               )}
             </div>
+            {["ADMIN", "RESIDENT"].includes(role) && (
+              <DocumentPanel
+                key={detail.id}
+                endpoint={endpoint("documents")}
+                flatId={detail.id}
+                admin={role === "ADMIN"}
+              />
+            )}
             {role === "ADMIN" && (
               <>
                 <div className="mt-6">
@@ -1373,6 +1406,113 @@ export function Workspace() {
     </div>
   );
 }
+function DocumentPanel({
+  endpoint,
+  flatId,
+  admin,
+}: {
+  endpoint: string;
+  flatId: string;
+  admin: boolean;
+}) {
+  const [rows, setRows] = useState<
+    { id: string; originalName: string; status: string }[]
+  >([]);
+  const [message, setMessage] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [visible, setVisible] = useState(false);
+  const reload = useCallback(async () => {
+    try {
+      setRows(
+        await request(`${endpoint}?flatId=${encodeURIComponent(flatId)}`),
+      );
+    } catch (e) {
+      setMessage((e as Error).message);
+    }
+  }, [endpoint, flatId]);
+  useEffect(() => {
+    let active = true;
+    request<{ id: string; originalName: string; status: string }[]>(
+      `${endpoint}?flatId=${encodeURIComponent(flatId)}`,
+    )
+      .then((data) => {
+        if (active) setRows(data);
+      })
+      .catch((e) => {
+        if (active) setMessage(e.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [endpoint, flatId]);
+  async function upload() {
+    if (!file) return;
+    const form = new FormData();
+    form.set("file", file);
+    form.set("flatId", flatId);
+    form.set("residentVisible", String(visible));
+    try {
+      const response = await fetch(endpoint, { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      setMessage("Queued for scanning. Refresh to check its status.");
+      await reload();
+    } catch (e) {
+      setMessage((e as Error).message);
+    }
+  }
+  return (
+    <section className="mt-6 rounded-xl border p-4">
+      <h3 className="font-bold">Private flat documents</h3>
+      <p className="my-2 text-sm text-slate-500">
+        Clean documents only. Resident sharing is limited to current authorized
+        members at upload; later occupants do not inherit access.
+      </p>
+      {admin && (
+        <div className="grid gap-3">
+          <label className="field">
+            PDF, PNG or JPEG · up to 10 MiB
+            <input
+              type="file"
+              accept="application/pdf,image/png,image/jpeg"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          <label className="flex gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={visible}
+              onChange={(e) => setVisible(e.target.checked)}
+            />
+            Share with current authorized residents
+          </label>
+          <Button disabled={!file} onClick={upload}>
+            Upload to quarantine
+          </Button>
+        </div>
+      )}
+      <Button className="my-3" variant="outline" onClick={reload}>
+        Refresh documents
+      </Button>
+      {!rows.length && <p className="text-sm">No accessible documents.</p>}
+      {rows.map((row) => (
+        <div key={row.id} className="my-2 break-all text-sm">
+          {row.status === "CLEAN" ? (
+            <a className="underline" href={`${endpoint}/${row.id}`}>
+              {row.originalName}
+            </a>
+          ) : (
+            row.originalName
+          )}{" "}
+          · {row.status}
+        </div>
+      ))}
+      <p role="status" className="mt-3 text-sm">
+        {message}
+      </p>
+    </section>
+  );
+}
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="panel">
@@ -1431,7 +1571,10 @@ function ImportPanel({
   endpoint: string;
   refresh: () => void;
 }) {
-  const [text, setText] = useState("[]");
+  const [text, setText] = useState(
+    "blockId,number,floor,flatType,areaSqFt,billableAreaSqFt,areaBasis,classification\n",
+  );
+  const [format, setFormat] = useState("csv");
   const [preview, setPreview] = useState<{
     count: number;
     rows: unknown[];
@@ -1445,7 +1588,9 @@ function ImportPanel({
       const result = await request<{ count: number; rows: unknown[] }>(
         endpoint,
         "POST",
-        { rows: JSON.parse(text), commit },
+        format === "csv"
+          ? { csv: text, commit }
+          : { rows: JSON.parse(text), commit },
       );
       if (commit) {
         setPreview(null);
@@ -1462,9 +1607,24 @@ function ImportPanel({
     <section className="panel">
       <h3 className="mb-3 text-lg font-bold">Validated flat import</h3>
       <p className="mb-4 text-sm text-slate-600">
-        Paste a JSON array using the flat schema in README. Maximum 500 rows.
-        Preview first; commit revalidates every row and inserts atomically.
+        Paste CSV using the required header names, or a JSON array using the
+        flat schema in README. Maximum 500 rows. Existing or duplicate flats are
+        rejected. Preview first; commit revalidates every row and inserts
+        atomically.
       </p>
+      <label className="field mb-4">
+        Format
+        <select
+          value={format}
+          onChange={(e) => {
+            setFormat(e.target.value);
+            setPreview(null);
+          }}
+        >
+          <option value="csv">CSV</option>
+          <option value="json">JSON</option>
+        </select>
+      </label>
       <label className="field">
         Flat rows
         <textarea

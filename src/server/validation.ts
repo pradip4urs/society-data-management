@@ -83,6 +83,8 @@ export const vehicleInput = z
     registration: text.transform((v) => v.toUpperCase().replace(/\s/g, "")),
     type: text,
     color: text,
+    make: z.string().trim().max(100).default(""),
+    model: z.string().trim().max(100).default(""),
   })
   .strict();
 export const slotInput = z
