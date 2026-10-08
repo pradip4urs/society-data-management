@@ -35,8 +35,8 @@ Run `bash scripts/first-admin.sh` in an interactive Bash/WSL terminal for guided
 ```bash
 read -rsp 'First admin password: ' bootstrap_password; echo
 printf '%s' "$bootstrap_password" | docker compose run --rm -T \
-  -e BOOTSTRAP_SOCIETY_NAME='Your Society' -e BOOTSTRAP_ADMIN_NAME='Administrator' \
-  -e BOOTSTRAP_ADMIN_EMAIL='admin@your-domain.example' operator node dist/bootstrap-admin.js
+  -e BOOTSTRAP_SOCIETY_NAME='Keshab Dham Housing Complex' -e BOOTSTRAP_ADMIN_NAME='Administrator' \
+  -e BOOTSTRAP_ADMIN_EMAIL='pradip4urs@gmail.com' operator node dist/bootstrap-admin.js
 unset bootstrap_password
 ```
 
