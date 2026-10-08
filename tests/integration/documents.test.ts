@@ -6,7 +6,11 @@ import {
   listDocuments,
   uploadDocument,
 } from "@/server/documents";
-import { bootstrapAdmin } from "@/server/bootstrap";
+import {
+  bootstrapAdmin,
+  bootstrapStatus,
+  InstallationAlreadyInitialized,
+} from "@/server/bootstrap";
 import { randomUUID } from "node:crypto";
 afterAll(() => db.$disconnect());
 it("denies quarantined/private/cross-flat documents and prevents access inheritance or revocation", async () => {
@@ -121,6 +125,7 @@ it("fails closed when the real scanner connection is unavailable", async () => {
 });
 it("refuses bootstrap in a populated database without adding users", async () => {
   const before = await db.user.count();
+  expect(await bootstrapStatus()).toEqual({ initialized: true });
   await expect(
     bootstrapAdmin({
       name: "Operator",
@@ -128,6 +133,6 @@ it("refuses bootstrap in a populated database without adding users", async () =>
       email: "new@example.test",
       password: "Synthetic-Long-Password-123",
     }),
-  ).rejects.toThrow();
+  ).rejects.toBeInstanceOf(InstallationAlreadyInitialized);
   expect(await db.user.count()).toBe(before);
 });

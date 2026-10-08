@@ -2,6 +2,19 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
 import { db } from "./db";
+export class InstallationAlreadyInitialized extends Error {
+  constructor() {
+    super("First-admin bootstrap requires an empty installation");
+    this.name = "InstallationAlreadyInitialized";
+  }
+}
+export async function bootstrapStatus() {
+  const [users, societies] = await db.$transaction([
+    db.user.count(),
+    db.society.count(),
+  ]);
+  return { initialized: users > 0 || societies > 0 };
+}
 export const bootstrapInput = z
   .object({
     societyName: z.string().trim().min(1).max(100),
@@ -16,7 +29,7 @@ export async function bootstrapAdmin(input: unknown) {
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(19372171)`;
     if ((await tx.user.count()) || (await tx.society.count()))
-      throw new Error("First-admin bootstrap requires an empty installation");
+      throw new InstallationAlreadyInitialized();
     const society = await tx.society.create({
       data: { name: data.societyName },
     });

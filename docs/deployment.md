@@ -30,6 +30,8 @@ On Windows import the public root into the current user's Trusted Root store: `I
 
 No default password and no email service. After migrations, provide a strong unique password without shell history or Docker environment exposure:
 
+Run `bash scripts/first-admin.sh` in an interactive Bash/WSL terminal for guided society/name/email prompts and a private confirmed password prompt. It uses the selected `.env`/ENV_FILE and does not store the password in a file or command arguments. The equivalent manual command is:
+
 ```bash
 read -rsp 'First admin password: ' bootstrap_password; echo
 printf '%s' "$bootstrap_password" | docker compose run --rm -T \
@@ -39,6 +41,19 @@ unset bootstrap_password
 ```
 
 Password minimum 16 characters. Bootstrap serializes in PostgreSQL and refuses an already populated installation. Sign in and enroll TOTP before ADMIN/CASHIER/AUDITOR business access. Save recovery codes securely when generated; only hashes are retained, and consumed codes cannot be replayed.
+
+Check setup status without supplying a password: `docker compose run --rm -T operator node dist/bootstrap-admin.js --check`. If initialized, bootstrap cannot create another first admin or reset a password. Provision an additional account in the existing society instead:
+
+```bash
+read -rsp 'New administrator password: ' admin_password; echo
+printf '%s' "$admin_password" | docker compose run --rm -T \
+  -e PROVISION_NAME='Administrator' -e PROVISION_EMAIL='your-admin@example.test' \
+  -e PROVISION_SOCIETY_ID='existing-society-id' -e PROVISION_ROLE=ADMIN \
+  operator node dist/provision-user.js
+unset admin_password
+```
+
+Find the existing society ID in the administrator UI or through the trusted host DB console. Provisioning does not rename the society or transfer records. A separate empty installation must use a distinct COMPOSE_PROJECT_NAME, document root, secret directory and unused proxy ports; do not delete old volumes to make bootstrap succeed. Updating example values in this document does not update persisted accounts. Bootstrap errors identify invalid setting names without exposing password values.
 
 Provision later local accounts similarly using `operator node dist/provision-user.js`, password on stdin and PROVISION_EMAIL/NAME/SOCIETY_ID/ROLE/PERSON_ID environment options. Resident membership alone grants no flat access; admin creates explicit dated grants, linked to occupancy for move-out revocation. Profile phone approval is separate from a resident's self-edited phone.
 
